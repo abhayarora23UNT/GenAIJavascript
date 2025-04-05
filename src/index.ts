@@ -24,7 +24,7 @@ const pinecone = new Pinecone({
 const pineconeIndex = pinecone.Index(process.env.PINECONE_INDEX_NAME as string);
 
 // This function returns a model used to convert text into a vector (a mathematical representation)//
-export const getEmbeddingModel = (): OpenAIEmbeddings => {
+export const getOpenAIEmbeddingModel = (): OpenAIEmbeddings => {
   return new OpenAIEmbeddings({
     model: EMBEDDING_MODEL,
     apiKey: process.env.OPEN_AI_KEY,
@@ -32,7 +32,7 @@ export const getEmbeddingModel = (): OpenAIEmbeddings => {
 };
 
 // Function to return a ChatOpenAI model.
-export const getChatOpenAI = (): ChatOpenAI => {
+export const getChatOpenAIModel = (): ChatOpenAI => {
   return new ChatOpenAI({
     apiKey: process.env.OPEN_AI_KEY,
     model: GPT_MODEL,
@@ -43,7 +43,7 @@ export const getChatOpenAI = (): ChatOpenAI => {
 
 // Function to add multiple context documents to Pinecone
 export const storeContextInPinecone = async () => {
-  const embeddings = getEmbeddingModel();
+  const embeddings = getOpenAIEmbeddingModel();
   const vectorStore = await PineconeStore.fromExistingIndex(embeddings, { pineconeIndex });
 
   // Sample context documents representing different parts of a person's life
@@ -76,8 +76,8 @@ export const storeContextInPinecone = async () => {
 
 // Function to retrieve context from Pinecone.
 // This function retrieves the most relevant context based on a query (like a user’s question).
-export const retrieveContextFromPinecone = async (query: string): Promise<string> => {
-  const embeddings = getEmbeddingModel();
+export const retrieveLatestContextFromPinecone = async (query: string): Promise<string> => {
+  const embeddings = getOpenAIEmbeddingModel();
   const vectorStore = await PineconeStore.fromExistingIndex(embeddings, { pineconeIndex });
 
   // Perform a similarity search on Pinecone to find the most relevant documents for the query
@@ -91,7 +91,7 @@ export const retrieveContextFromPinecone = async (query: string): Promise<string
 
 // Function to create a ChatPromptTemplate.
 // Use the `ChatPromptTemplate.fromMessages` method to include placeholders for `context` and `history`.
-export const getPromptTemplate = (): ChatPromptTemplate => {
+export const getChatPromptTemplate = (): ChatPromptTemplate => {
   return ChatPromptTemplate.fromMessages([
     ["system", "You are a dedicated medical assistant, focused on providing personalized advice related to health, nutrition, and exercise. Each response should be tailored to the provided context: {context}. Offer clear, actionable recommendations without any unnecessary explanations"],
     new MessagesPlaceholder("history"),
@@ -101,10 +101,10 @@ export const getPromptTemplate = (): ChatPromptTemplate => {
 
 // Function to create a RunnableWithMessageHistory.
 // This function sets up the chat chain, which is a sequence of tasks: first, it prepares the prompt, then it generates a response from the AI, and finally, it parses the output.
-export const getChainWithHistory = () => {
+export const getSequenceChainWithHistory = () => {
   const messageHistory = new ChatMessageHistory();
-  const chatModel = getChatOpenAI();
-  const prompt = getPromptTemplate();
+  const chatModel = getChatOpenAIModel();
+  const prompt = getChatPromptTemplate();
   return new RunnableWithMessageHistory({
     runnable: prompt.pipe(chatModel).pipe(new StringOutputParser()),
     inputMessagesKey: USER_QUERY_KEY,
@@ -120,7 +120,7 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-function askQuestion(question: string) {
+function askUserQuery(question: string) {
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       resolve(answer);
@@ -130,9 +130,9 @@ function askQuestion(question: string) {
 
 export const startDocAssistantChat = async (): Promise<void> => {
   const config = { configurable: { sessionId: "1" } }; // Configuration for the chain
-  const userInput = await askQuestion("You: ") as string; // Get user input
-  const context = await retrieveContextFromPinecone(userInput); // Load context from Pinecone
-  const chainWithHistory = getChainWithHistory();      // Get the chat chain with history
+  const userInput = await askUserQuery("You: ") as string; // Get user input
+  const context = await retrieveLatestContextFromPinecone(userInput); // Load context from Pinecone
+  const chainWithHistory = getSequenceChainWithHistory();      // Get the chat chain with history
 
   // Invoke the chain with the user input and context
   const output = await chainWithHistory.invoke(
